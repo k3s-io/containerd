@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -237,14 +238,13 @@ func (r *dockerResolver) Resolve(ctx context.Context, ref string) (string, ocisp
 	if err != nil {
 		return "", ocispec.Descriptor{}, err
 	}
-	refspec := base.refspec
-	if refspec.Object == "" {
+	if base.refspec.Object == "" {
 		return "", ocispec.Descriptor{}, reference.ErrObjectRequired
 	}
 
 	var (
 		paths [][]string
-		dgst  = refspec.Digest()
+		dgst  = base.refspec.Digest()
 		caps  = HostCapabilityPull
 	)
 
@@ -262,18 +262,13 @@ func (r *dockerResolver) Resolve(ctx context.Context, ref string) (string, ocisp
 		paths = append(paths, []string{"blobs", dgst.String()})
 	} else {
 		// Add
-		paths = append(paths, []string{"manifests", refspec.Object})
+		paths = append(paths, []string{"manifests", base.refspec.Object})
 		caps |= HostCapabilityResolve
 	}
 
 	hosts := base.filterHosts(caps)
 	if len(hosts) == 0 {
 		return "", ocispec.Descriptor{}, fmt.Errorf("no resolve hosts: %w", errdefs.ErrNotFound)
-	}
-
-	ctx, err = ContextWithRepositoryScope(ctx, refspec, false)
-	if err != nil {
-		return "", ocispec.Descriptor{}, err
 	}
 
 	var (
@@ -294,7 +289,11 @@ func (r *dockerResolver) Resolve(ctx context.Context, ref string) (string, ocisp
 	for _, u := range paths {
 		for i, host := range hosts {
 			ctx := log.WithLogger(ctx, log.G(ctx).WithField("host", host.Host))
-
+			base := base.withRewritesFromHost(host)
+			ctx, err = ContextWithRepositoryScope(ctx, base.refspec, false)
+			if err != nil {
+				return "", ocispec.Descriptor{}, err
+			}
 			req := base.request(host, http.MethodHead, u...)
 			if err := req.addNamespace(base.refspec.Hostname()); err != nil {
 				return "", ocispec.Descriptor{}, err
@@ -517,7 +516,6 @@ func (r *dockerBase) request(host RegistryHost, method string, ps ...string) *re
 	if header == nil {
 		header = http.Header{}
 	}
-
 	for key, value := range host.Header {
 		header[key] = append(header[key], value...)
 	}
@@ -538,6 +536,28 @@ func (r *dockerBase) request(host RegistryHost, method string, ps ...string) *re
 		header: header,
 		host:   host,
 	}
+}
+
+func (r *dockerBase) withRewritesFromHost(host RegistryHost) *dockerBase {
+	for pattern, replace := range host.Rewrites {
+		exp, err := regexp.Compile(pattern)
+		if err != nil {
+			log.L.WithError(err).Warnf("Failed to compile rewrite, `%s`, for %s", pattern, host.Host)
+			continue
+		}
+		if rr := exp.ReplaceAllString(r.repository, replace); rr != r.repository {
+			log.L.Debugf("Rewrote repository for %s: %s => %s", r.refspec, r.repository, rr)
+			return &dockerBase{
+				refspec: reference.Spec{
+					Locator: r.refspec.Hostname() + "/" + rr,
+					Object:  r.refspec.Object,
+				},
+				repository: rr,
+				header:     r.header,
+			}
+		}
+	}
+	return r
 }
 
 func (r *request) authorize(ctx context.Context, req *http.Request) error {
