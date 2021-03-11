@@ -80,6 +80,7 @@ type RegistryHost struct {
 	Path         string
 	Capabilities HostCapabilities
 	Header       http.Header
+	Rewrites     map[string]string
 }
 
 func (h RegistryHost) isProxy(refhost string) bool {
