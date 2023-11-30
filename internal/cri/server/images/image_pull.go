@@ -517,13 +517,13 @@ func (c *CRIImageService) registryHosts(ctx context.Context, credentials func(ho
 	return func(host string) ([]docker.RegistryHost, error) {
 		var registries []docker.RegistryHost
 
-		endpoints, err := c.registryEndpoints(host)
-		if err != nil {
-			return nil, fmt.Errorf("get registry endpoints: %w", err)
-		}
 		rewrites, err := c.registryRewrites(host)
 		if err != nil {
 			return nil, fmt.Errorf("get registry rewrites: %w", err)
+		}
+		endpoints, err := c.registryEndpoints(host)
+		if err != nil {
+			return nil, fmt.Errorf("get registry endpoints: %w", err)
 		}
 		for _, e := range endpoints {
 			u, err := url.Parse(e)
@@ -665,17 +665,13 @@ func (c *CRIImageService) registryEndpoints(host string) ([]string, error) {
 }
 
 func (c *CRIImageService) registryRewrites(host string) (map[string]string, error) {
-	var rewrites map[string]string
-	_, ok := c.config.Registry.Mirrors[host]
-	if ok {
-		rewrites = c.config.Registry.Mirrors[host].Rewrites
-	} else {
-		rewrites = c.config.Registry.Mirrors["*"].Rewrites
+	hosts := []string{host, "*"}
+	for _, host := range hosts {
+		if host, ok := c.config.Registry.Mirrors[host]; ok {
+			return host.Rewrites, nil
+		}
 	}
-	if rewrites == nil {
-		rewrites = map[string]string{}
-	}
-	return rewrites, nil
+	return nil, nil
 }
 
 // encryptedImagesPullOpts returns the necessary list of pull options required
