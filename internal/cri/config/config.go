@@ -208,7 +208,7 @@ type Mirror struct {
 	// The scheme, host and path from the endpoint URL will be used.
 	Endpoints []string `toml:"endpoint" json:"endpoint"`
 
-	// Rewrites are repository rewrite rules for a namespace. When fetching image resources
+	// Rewrites is a map of repository rewrite rules for a namespace. When fetching image resources
 	// from an endpoint and a key matches the repository via regular expression matching
 	// it will be replaced with the corresponding value from the map in the resource request.
 	//
