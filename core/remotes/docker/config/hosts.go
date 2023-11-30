@@ -56,6 +56,7 @@ type hostConfig struct {
 
 	header http.Header
 
+	rewrites map[string]string
 	// TODO: Add credential configuration (domain alias, username)
 }
 
@@ -231,6 +232,7 @@ func ConfigureHosts(ctx context.Context, options HostOptions) docker.RegistryHos
 			rhosts[i].Path = host.path
 			rhosts[i].Capabilities = host.capabilities
 			rhosts[i].Header = host.header
+			rhosts[i].Rewrites = host.rewrites
 		}
 
 		return rhosts, nil
@@ -373,6 +375,10 @@ type hostFileConfig struct {
 	// a connect to complete.
 	DialTimeout string `toml:"dial_timeout"`
 
+	// Rewrites contains a map of regex/replacement values, used to modify
+	// the image name when pulling.
+	Rewrites map[string]string `toml:"rewrite"`
+
 	// TODO: Credentials: helper? name? username? alternate domain? token?
 }
 
@@ -410,13 +416,22 @@ func parseHostsFile(baseDir string, b []byte) ([]hostConfig, error) {
 		hosts = append(hosts, parsed)
 	}
 
-	// Parse root host config and append it as the last element
-	parsed, err := parseHostConfig(c.Server, baseDir, c.hostFileConfig)
+	tree, err := getTopLevelKeyValues(b)
 	if err != nil {
 		return nil, err
 	}
-	hosts = append(hosts, parsed)
 
+	// If the server key is set at the root of the tree, or no other hosts are configured,
+	// parse the root host config and append it as the last element.
+	// This allows not using upstream by including hosts and excluding the server key as documented at
+	// https://github.com/containerd/containerd/blob/release/1.7/docs/hosts.md#setup-a-local-mirror-for-docker
+	if _, ok := tree["server"]; ok || len(hosts) == 0 {
+		parsed, err := parseHostConfig(c.Server, baseDir, c.hostFileConfig)
+		if err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, parsed)
+	}
 	return hosts, nil
 }
 
@@ -448,6 +463,7 @@ func parseHostConfig(server string, baseDir string, config hostFileConfig) (host
 	}
 
 	result.skipVerify = config.SkipVerify
+	result.rewrites = config.Rewrites
 
 	if len(config.Capabilities) > 0 {
 		for _, c := range config.Capabilities {
@@ -544,6 +560,32 @@ func parseHostConfig(server string, baseDir string, config hostFileConfig) (host
 	}
 
 	return result, nil
+}
+
+func getTopLevelKeyValues(b []byte) (map[string]string, error) {
+	keyVals := map[string]string{}
+
+	// Use toml unstable package for directly parsing toml
+	// See https://github.com/pelletier/go-toml/discussions/801#discussioncomment-7083586
+	p := tomlu.Parser{}
+	p.Reset(b)
+
+	// iterate over top level expressions until we find something that's not a simple KeyValue
+	for p.NextExpression() {
+		e := p.Expression()
+
+		if e.Kind != tomlu.KeyValue {
+			break
+		}
+
+		k := e.Key()
+		v := e.Value()
+		if keyNode := k.Node(); keyNode != nil && v != nil {
+			keyVals[string(keyNode.Data)] = string(v.Data)
+		}
+	}
+
+	return keyVals, p.Error()
 }
 
 // getSortedHosts returns the list of hosts in the order are they defined in the file.
