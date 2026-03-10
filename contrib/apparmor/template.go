@@ -40,8 +40,6 @@ import (
 const dir = "/etc/apparmor.d"
 
 const defaultTemplate = `
-abi <abi/3.0>,
-
 {{range $value := .Imports}}
 {{$value}}
 {{end}}
