@@ -1,6 +1,6 @@
 module github.com/containerd/containerd/v2
 
-go 1.25.7
+go 1.24.13
 
 require (
 	dario.cat/mergo v1.0.2
@@ -26,7 +26,7 @@ require (
 	github.com/containerd/otelttrpc v0.1.0
 	github.com/containerd/platforms v1.0.0-rc.2
 	github.com/containerd/plugin v1.0.0
-	github.com/containerd/stargz-snapshotter v0.18.2
+	github.com/containerd/stargz-snapshotter v0.18.1
 	github.com/containerd/ttrpc v1.2.7
 	github.com/containerd/typeurl/v2 v2.2.3
 	github.com/containerd/zfs/v2 v2.0.0
@@ -85,9 +85,9 @@ require (
 	google.golang.org/grpc v1.78.0
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/inf.v0 v0.9.1
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
-	k8s.io/cri-api v0.35.0
+	k8s.io/apimachinery v0.34.5
+	k8s.io/client-go v0.34.5
+	k8s.io/cri-api v0.34.5
 	k8s.io/klog/v2 v2.130.1
 	tags.cncf.io/container-device-interface v1.1.0
 )
@@ -99,7 +99,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cilium/ebpf v0.16.0 // indirect
-	github.com/containerd/stargz-snapshotter/estargz v0.18.2 // indirect
+	github.com/containerd/stargz-snapshotter/estargz v0.18.1 // indirect
 	github.com/containers/ocicrypt v1.2.1 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/cyphar/filepath-securejoin v0.6.0 // indirect
@@ -170,7 +170,7 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20251029180050-ab9386a59fda // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/api v0.35.0 // indirect
+	k8s.io/api v0.34.5 // indirect
 	k8s.io/kube-openapi v0.0.0-20250910181357-589584f1c912 // indirect
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
