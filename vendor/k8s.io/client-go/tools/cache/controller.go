@@ -204,15 +204,13 @@ func (c *controller) LastSyncResourceVersion() string {
 // concurrently.
 func (c *controller) processLoop(ctx context.Context) {
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			_, err := c.config.Pop(PopProcessFunc(c.config.Process))
-			if err != nil {
-				if errors.Is(err, ErrFIFOClosed) {
-					return
-				}
+		// TODO: Plumb through the ctx so that this can
+		// actually exit when the controller is stopped. Or just give up on this stuff
+		// ever being stoppable.
+		_, err := c.config.Queue.Pop(PopProcessFunc(c.config.Process))
+		if err != nil {
+			if err == ErrFIFOClosed {
+				return
 			}
 		}
 	}
@@ -596,7 +594,16 @@ func newInformer(clientState Store, options InformerOptions) Controller {
 	// KeyLister, that way resync operations will result in the correct set
 	// of update/delete deltas.
 
-	fifo := newQueueFIFO(clientState, options.Transform)
+	var fifo Queue
+	if clientgofeaturegate.FeatureGates().Enabled(clientgofeaturegate.InOrderInformers) {
+		fifo = NewRealFIFO(MetaNamespaceKeyFunc, clientState, options.Transform)
+	} else {
+		fifo = NewDeltaFIFOWithOptions(DeltaFIFOOptions{
+			KnownObjects:          clientState,
+			EmitDeltaTypeReplaced: true,
+			Transformer:           options.Transform,
+		})
+	}
 
 	cfg := &Config{
 		Queue:            fifo,
@@ -613,16 +620,4 @@ func newInformer(clientState Store, options InformerOptions) Controller {
 		},
 	}
 	return New(cfg)
-}
-
-func newQueueFIFO(clientState Store, transform TransformFunc) Queue {
-	if clientgofeaturegate.FeatureGates().Enabled(clientgofeaturegate.InOrderInformers) {
-		return NewRealFIFO(MetaNamespaceKeyFunc, clientState, transform)
-	} else {
-		return NewDeltaFIFOWithOptions(DeltaFIFOOptions{
-			KnownObjects:          clientState,
-			EmitDeltaTypeReplaced: true,
-			Transformer:           transform,
-		})
-	}
 }
