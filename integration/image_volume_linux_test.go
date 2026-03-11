@@ -41,22 +41,20 @@ func TestImageVolumeBasic(t *testing.T) {
 
 	snSrv := containerdClient.SnapshotService("overlayfs")
 	for _, tc := range []struct {
-		name                           string
-		containerImage                 string
-		selinuxLevel                   string
-		imageVolumeImage, imageSubPath string
-		containerPath                  string
+		name                              string
+		containerImage                    string
+		selinuxLevel                      string
+		imageVolumeImage, imageVolumePath string
 
-		createContainerError string
-		execSyncCommands     []string
-		execSyncError        string
-		execSyncOutput       string
+		execSyncCommands []string
+		execSyncError    string
+		execSyncOutput   string
 	}{
 		{
 			name:             "should be readonly content",
 			containerImage:   images.Get(images.Alpine),
 			imageVolumeImage: images.Get(images.Pause),
-			containerPath:    "/image-mount",
+			imageVolumePath:  "/image-mount",
 			execSyncCommands: []string{"rm", "/image-mount/pause"},
 			execSyncError:    "can't remove '/image-mount/pause': Read-only file system",
 		},
@@ -65,7 +63,7 @@ func TestImageVolumeBasic(t *testing.T) {
 			containerImage:   images.Get(images.ResourceConsumer),
 			selinuxLevel:     "s0:c4,c5",
 			imageVolumeImage: images.Get(images.Pause),
-			containerPath:    "/image-mount",
+			imageVolumePath:  "/image-mount",
 			execSyncCommands: []string{"ls", "-Z", "/image-mount"},
 			execSyncOutput:   "system_u:object_r:container_file_t:s0:c4,c5 pause",
 		},
@@ -74,58 +72,9 @@ func TestImageVolumeBasic(t *testing.T) {
 			containerImage:   images.Get(images.ResourceConsumer),
 			selinuxLevel:     "s0:c200,c100",
 			imageVolumeImage: images.Get(images.Pause),
-			containerPath:    "/image-mount",
+			imageVolumePath:  "/image-mount",
 			execSyncCommands: []string{"ls", "-Z", "/image-mount"},
 			execSyncOutput:   "system_u:object_r:container_file_t:s0:c100,c200 pause",
-		},
-		{
-			name:             "should only mount image subpath",
-			containerImage:   images.Get(images.Alpine),
-			imageVolumeImage: images.Get(images.Alpine),
-			imageSubPath:     "etc",
-			containerPath:    "/image-mount",
-			execSyncCommands: []string{"ls", filepath.Join("/image-mount", "os-release")},
-			execSyncOutput:   filepath.Join("/image-mount", "os-release"),
-		},
-		{
-			name:                 "fail to mount single file subpath",
-			containerImage:       images.Get(images.Alpine),
-			imageVolumeImage:     images.Get(images.Pause),
-			imageSubPath:         "pause",
-			containerPath:        "/image-mount",
-			createContainerError: "only directory subpath is supported",
-		},
-		{
-			name:                 "fail to mount non-existent subpath",
-			containerImage:       images.Get(images.Alpine),
-			imageVolumeImage:     images.Get(images.Alpine),
-			imageSubPath:         "non-existent-subpath",
-			containerPath:        "/image-mount",
-			createContainerError: "no such file or directory",
-		},
-		{
-			name:                 "fail to mount absolute subpath",
-			containerImage:       images.Get(images.Alpine),
-			imageVolumeImage:     images.Get(images.Alpine),
-			imageSubPath:         "/etc",
-			containerPath:        "/image-mount",
-			createContainerError: "path escapes from parent",
-		},
-		{
-			name:                 "fail to mount escaped subpath",
-			containerImage:       images.Get(images.Alpine),
-			imageVolumeImage:     images.Get(images.Alpine),
-			imageSubPath:         "etc/../../..",
-			containerPath:        "/image-mount",
-			createContainerError: "path escapes from parent",
-		},
-		{
-			name:                 "fail to mount a symlink file that escapes subpath",
-			containerImage:       images.Get(images.Alpine),
-			imageVolumeImage:     images.Get(images.Alpine),
-			imageSubPath:         "bin/sh", // `bin/sh` is a symlink to `/bin/busybox` in the mount image
-			containerPath:        "/image-mount",
-			createContainerError: "path escapes from parent",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -135,13 +84,7 @@ func TestImageVolumeBasic(t *testing.T) {
 				}
 			}
 
-			podCtx, cnID, err := setupRunningContainerWithImageVolume(t, tc.selinuxLevel, tc.containerImage, tc.imageVolumeImage, tc.imageSubPath, tc.containerPath)
-			if err != nil {
-				require.NotEmpty(t, tc.createContainerError)
-				require.Contains(t, err.Error(), tc.createContainerError)
-				return
-			}
-			require.Empty(t, tc.createContainerError)
+			podCtx, cnID := setupRunningContainerWithImageVolume(t, tc.selinuxLevel, tc.containerImage, tc.imageVolumeImage, tc.imageVolumePath)
 
 			cleanup := true
 			defer func() {
@@ -163,7 +106,7 @@ func TestImageVolumeBasic(t *testing.T) {
 				cleanup = false
 
 				t.Log("Check snapshot after deleting pod")
-				for range 30 {
+				for i := 0; i < 30; i++ {
 					_, err := snSrv.Mounts(ctx, volumeImgTarget)
 					if errdefs.IsNotFound(err) {
 						return
@@ -187,7 +130,7 @@ func TestImageVolumeBasic(t *testing.T) {
 	}
 }
 
-func setupRunningContainerWithImageVolume(t *testing.T, selinuxLevel string, containerImage string, imageVolumeName, imageSubPath, containerPath string) (podCtx *podTCtx, cnID string, err error) {
+func setupRunningContainerWithImageVolume(t *testing.T, selinuxLevel string, containerImage string, imageVolumeName, imageVolumePath string) (*podTCtx, string) {
 	podLogDir := t.TempDir()
 
 	podOpts := []PodSandboxOpts{
@@ -196,9 +139,9 @@ func setupRunningContainerWithImageVolume(t *testing.T, selinuxLevel string, con
 	if selinuxLevel != "" {
 		podOpts = append(podOpts, WithSelinuxLevel(selinuxLevel))
 	}
-	podCtx = newPodTCtx(t, runtimeService, t.Name(), "image-voloume", podOpts...)
+	podCtx := newPodTCtx(t, runtimeService, t.Name(), "image-voloume", podOpts...)
 	defer func() {
-		if t.Failed() || err != nil {
+		if t.Failed() {
 			podCtx.stop(true)
 		}
 	}()
@@ -206,18 +149,13 @@ func setupRunningContainerWithImageVolume(t *testing.T, selinuxLevel string, con
 	pullImagesByCRI(t, imageService, containerImage, imageVolumeName)
 
 	containerName := "running"
-	cfg := ContainerConfig(containerName, containerImage,
+	cnID := podCtx.createContainer(containerName,
+		containerImage,
+		criruntime.ContainerState_CONTAINER_RUNNING,
 		WithCommand("sleep", "1d"),
-		WithImageVolumeMount(imageVolumeName, imageSubPath, containerPath),
-		WithLogPath(containerName),
-	)
-	cnID, err = podCtx.rSvc.CreateContainer(podCtx.id, cfg, podCtx.cfg)
-	if err != nil {
-		return podCtx, "", err
-	}
-
-	require.NoError(t, podCtx.rSvc.StartContainer(cnID))
-	return podCtx, cnID, nil
+		WithImageVolumeMount(imageVolumeName, imageVolumePath),
+		WithLogPath(containerName))
+	return podCtx, cnID
 }
 
 func TestImageVolumeCheckVolatileOption(t *testing.T) {
@@ -231,8 +169,7 @@ func TestImageVolumeCheckVolatileOption(t *testing.T) {
 	}
 
 	containerImage := images.Get(images.Alpine)
-	podCtx, _, err := setupRunningContainerWithImageVolume(t, "", containerImage, containerImage, "", "/alpine")
-	require.NoError(t, err)
+	podCtx, _ := setupRunningContainerWithImageVolume(t, "", containerImage, containerImage, "/alpine")
 	t.Cleanup(func() {
 		podCtx.stop(true)
 	})
@@ -307,7 +244,7 @@ func TestImageVolumeSetupIfContainerdRestarts(t *testing.T) {
 				alpineImage,
 				criruntime.ContainerState_CONTAINER_RUNNING,
 				WithCommand("sleep", "1d"),
-				WithImageVolumeMount(alpineImage, "", "/alpine-2"))
+				WithImageVolumeMount(alpineImage, "/alpine-2"))
 
 			mpInfo1, err := mount.Lookup(targetVolumeMount)
 			require.NoError(t, err)
@@ -317,7 +254,7 @@ func TestImageVolumeSetupIfContainerdRestarts(t *testing.T) {
 				alpineImage,
 				criruntime.ContainerState_CONTAINER_RUNNING,
 				WithCommand("sleep", "1d"),
-				WithImageVolumeMount(alpineImage, "", "/alpine-2"))
+				WithImageVolumeMount(alpineImage, "/alpine-2"))
 
 			mpInfo2, err := mount.Lookup(targetVolumeMount)
 			require.NoError(t, err)
