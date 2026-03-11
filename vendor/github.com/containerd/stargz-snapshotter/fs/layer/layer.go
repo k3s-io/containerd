@@ -235,12 +235,11 @@ func newCache(root string, cacheType string, cfg config.Config) (cache.BlobCache
 	return cache.NewDirectoryCache(
 		cachePath,
 		cache.DirectoryCacheConfig{
-			SyncAdd:      dcc.SyncAdd,
-			DataCache:    dCache,
-			FdCache:      fCache,
-			BufPool:      bufPool,
-			Direct:       dcc.Direct,
-			FadvDontNeed: dcc.FadvDontNeed,
+			SyncAdd:   dcc.SyncAdd,
+			DataCache: dCache,
+			FdCache:   fCache,
+			BufPool:   bufPool,
+			Direct:    dcc.Direct,
 		},
 	)
 }
