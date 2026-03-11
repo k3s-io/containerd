@@ -25,9 +25,11 @@ import (
 	"github.com/containerd/containerd/v2/core/images"
 	"github.com/containerd/containerd/v2/core/images/converter"
 	"github.com/containerd/containerd/v2/core/images/converter/uncompress"
+	"github.com/containerd/containerd/v2/pkg/archive/compression"
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/errdefs"
 	"github.com/containerd/stargz-snapshotter/estargz"
+	"github.com/containerd/stargz-snapshotter/util/ioutils"
 	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -37,18 +39,13 @@ import (
 // LayerConvertFunc for more details. The difference between this function and
 // LayerConvertFunc is that this allows to specify additional eStargz options per layer.
 func LayerConvertWithLayerAndCommonOptsFunc(opts map[digest.Digest][]estargz.Option, commonOpts ...estargz.Option) converter.ConvertFunc {
-	// explicitly copy the incoming commonOpts parameter to
-	// avoid the data race problem, see also https://github.com/containerd/stargz-snapshotter/issues/2132
-	copiedCommonOpts := make([]estargz.Option, len(commonOpts))
-	copy(copiedCommonOpts, commonOpts)
-
 	if opts == nil {
-		return LayerConvertFunc(copiedCommonOpts...)
+		return LayerConvertFunc(commonOpts...)
 	}
 	return func(ctx context.Context, cs content.Store, desc ocispec.Descriptor) (*ocispec.Descriptor, error) {
 		// TODO: enable to speciy option per layer "index" because it's possible that there are
 		//       two layers having same digest in an image (but this should be rare case)
-		return LayerConvertFunc(append(copiedCommonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
+		return LayerConvertFunc(append(commonOpts, opts[desc.Digest]...)...)(ctx, cs, desc)
 	}
 }
 
@@ -99,13 +96,35 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			return nil, err
 		}
 
-		n, err := io.Copy(w, blob)
+		// Copy and count the contents
+		pr, pw := io.Pipe()
+		c := new(ioutils.CountWriter)
+		doneCount := make(chan struct{})
+		go func() {
+			defer close(doneCount)
+			defer pr.Close()
+			decompressR, err := compression.DecompressStream(pr)
+			if err != nil {
+				pr.CloseWithError(err)
+				return
+			}
+			defer decompressR.Close()
+			if _, err := io.Copy(c, decompressR); err != nil {
+				pr.CloseWithError(err)
+				return
+			}
+		}()
+		n, err := io.Copy(w, io.TeeReader(blob, pw))
 		if err != nil {
 			return nil, err
 		}
 		if err := blob.Close(); err != nil {
 			return nil, err
 		}
+		if err := pw.Close(); err != nil {
+			return nil, err
+		}
+		<-doneCount
 
 		// update diffID label
 		labelz[labels.LabelUncompressed] = blob.DiffID().String()
@@ -129,11 +148,7 @@ func LayerConvertFunc(opts ...estargz.Option) converter.ConvertFunc {
 			newDesc.Annotations = make(map[string]string, 1)
 		}
 		newDesc.Annotations[estargz.TOCJSONDigestAnnotation] = blob.TOCDigest().String()
-		uncompressedSize, err := blob.UncompressedSize()
-		if err != nil {
-			return nil, err
-		}
-		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", uncompressedSize)
+		newDesc.Annotations[estargz.StoreUncompressedSizeAnnotation] = fmt.Sprintf("%d", c.Size())
 		return &newDesc, nil
 	}
 }
